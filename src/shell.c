@@ -1,101 +1,133 @@
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <readline/readline.h>
+#include <readline/history.h>
+#include <ctype.h>
 #include "shell.h"
 
-/* ---------- Trim whitespace ---------- */
-char *trim_whitespace(char *s) {
-    char *end;
-    while (isspace((unsigned char)*s)) s++;
-    if (*s == 0) return s;
-    end = s + strlen(s) - 1;
-    while (end > s && isspace((unsigned char)*end)) end--;
-    end[1] = '\0';
-    return s;
-}
+/* PROMPT */
+#define PROMPT "myshell> "
 
-/* ---------- Tokenize input ---------- */
-char **tokenize(const char *line) {
+/* Split input by semicolons into an array of strings.
+   Returns dynamically-allocated array (NULL-terminated). Caller free each string and the array.
+*/
+static char **split_by_semicolon(const char *line) {
     if (!line) return NULL;
-    char *copy = strdup(line);
-    if (!copy) return NULL;
+    size_t cap = 8, n = 0;
+    char **arr = malloc(cap * sizeof(char*));
+    if (!arr) return NULL;
 
-    int cap = 8;
-    char **tokens = malloc(cap * sizeof(char *));
-    int count = 0;
-    char *tok, *saveptr = NULL;
-
-    tok = strtok_r(copy, " \t", &saveptr);
-    while (tok) {
-        if (count + 1 >= cap) {
-            cap *= 2;
-            tokens = realloc(tokens, cap * sizeof(char *));
+    const char *p = line;
+    const char *start = p;
+    while (*p) {
+        if (*p == ';') {
+            size_t len = p - start;
+            /* allocate and copy trimmed substring */
+            char *s = malloc(len + 1);
+            if (!s) goto err;
+            memcpy(s, start, len);
+            s[len] = '\0';
+            if (n + 1 >= cap) { cap *= 2; char **t = realloc(arr, cap * sizeof(char*)); if (!t) goto err; arr = t; }
+            arr[n++] = s;
+            p++; start = p;
+            continue;
         }
-        tokens[count++] = strdup(tok);
-        tok = strtok_r(NULL, " \t", &saveptr);
+        p++;
     }
-    tokens[count] = NULL;
-    free(copy);
-    return tokens;
+    /* tail */
+    if (p != start) {
+        size_t len = p - start;
+        char *s = malloc(len + 1);
+        if (!s) goto err;
+        memcpy(s, start, len);
+        s[len] = '\0';
+        if (n + 1 >= cap) { cap *= 2; char **t = realloc(arr, cap * sizeof(char*)); if (!t) goto err; arr = t; }
+        arr[n++] = s;
+    }
+
+    arr[n] = NULL;
+    return arr;
+
+err:
+    for (size_t i = 0; i < n; ++i) free(arr[i]);
+    free(arr);
+    return NULL;
 }
 
-void free_tokens(char **tokens) {
-    if (!tokens) return;
-    for (int i = 0; tokens[i]; i++)
-        free(tokens[i]);
-    free(tokens);
+/* free split results */
+static void free_split(char **arr) {
+    if (!arr) return;
+    for (size_t i = 0; arr[i] != NULL; ++i) free(arr[i]);
+    free(arr);
 }
 
-/* ---------- Parse pipeline ---------- */
-pipeline_t parse_pipeline(char **tokens) {
-    pipeline_t pl;
-    pl.count = 0;
-    pl.commands = NULL;
+int main(void) {
+    char *line = NULL;
 
-    if (!tokens) return pl;
+    while (1) {
+        /* reap any finished background jobs before showing prompt */
+        jobs_reap();
 
-    int cap = 2;
-    pl.commands = malloc(cap * sizeof(command_t));
-
-    command_t current = {0};
-    int argc = 0, argv_cap = 8;
-    current.argv = malloc(argv_cap * sizeof(char *));
-    current.infile = NULL;
-    current.outfile = NULL;
-
-    for (int i = 0; tokens[i]; i++) {
-        if (strcmp(tokens[i], "|") == 0) {
-            current.argv[argc] = NULL;
-            pl.commands[pl.count++] = current;
-            if (pl.count >= cap) {
-                cap *= 2;
-                pl.commands = realloc(pl.commands, cap * sizeof(command_t));
-            }
-            current.argv = malloc(argv_cap * sizeof(char *));
-            current.infile = NULL;
-            current.outfile = NULL;
-            argc = 0;
-        } else if (strcmp(tokens[i], "<") == 0 && tokens[i + 1]) {
-            current.infile = strdup(tokens[++i]);
-        } else if (strcmp(tokens[i], ">") == 0 && tokens[i + 1]) {
-            current.outfile = strdup(tokens[++i]);
-        } else {
-            if (argc + 1 >= argv_cap) {
-                argv_cap *= 2;
-                current.argv = realloc(current.argv, argv_cap * sizeof(char *));
-            }
-            current.argv[argc++] = strdup(tokens[i]);
+        line = readline(PROMPT);
+        if (!line) { /* EOF */
+            printf("\n");
+            break;
         }
-    }
-    current.argv[argc] = NULL;
-    pl.commands[pl.count++] = current;
-    return pl;
-}
 
-void free_pipeline(pipeline_t *pl) {
-    for (int i = 0; i < pl->count; i++) {
-        for (int j = 0; pl->commands[i].argv[j]; j++)
-            free(pl->commands[i].argv[j]);
-        free(pl->commands[i].argv);
-        free(pl->commands[i].infile);
-        free(pl->commands[i].outfile);
+        char *trimmed_line = trim_whitespace(line);
+        if (!trimmed_line || *trimmed_line == '\0') {
+            free(line);
+            continue;
+        }
+
+        /* Add to readline history (only non-empty commands) */
+        add_history(trimmed_line);
+
+        /* Split by semicolon for command chaining */
+        char **parts = split_by_semicolon(trimmed_line);
+        if (!parts) { free(line); continue; }
+
+        for (size_t i = 0; parts[i] != NULL; ++i) {
+            char *cmdstr = trim_whitespace(parts[i]);
+            if (!cmdstr || *cmdstr == '\0') continue;
+
+            /* detect background '&' at end */
+            int background = 0;
+            size_t L = strlen(cmdstr);
+            /* skip trailing whitespace */
+            while (L > 0 && isspace((unsigned char)cmdstr[L-1])) { cmdstr[L-1] = '\0'; --L; }
+            if (L > 0 && cmdstr[L-1] == '&') {
+                background = 1;
+                cmdstr[L-1] = '\0';
+                /* trim trailing spaces again */
+                while (L > 0 && isspace((unsigned char)cmdstr[L-1])) { cmdstr[L-1] = '\0'; --L; }
+            }
+
+            if (*cmdstr == '\0') continue;
+
+            /* built-in 'jobs' */
+            if (!background && strcmp(cmdstr, "jobs") == 0) {
+                jobs_print();
+                continue;
+            }
+
+            /* tokenize and parse pipeline then execute */
+            char **tokens = tokenize(cmdstr);
+            if (!tokens) continue;
+            pipeline_t *pl = parse_pipeline(tokens);
+            free_tokens(tokens);
+            if (!pl) continue;
+
+            execute_pipeline(pl, background, cmdstr);
+
+            free_pipeline(pl);
+        }
+
+        free_split(parts);
+        free(line);
     }
-    free(pl->commands);
+
+    return 0;
 }
