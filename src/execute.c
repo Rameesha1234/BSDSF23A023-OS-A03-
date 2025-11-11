@@ -1,61 +1,76 @@
 #include "shell.h"
 
 int execute(char* arglist[]) {
+    if (arglist == NULL || arglist[0] == NULL) return 0;
+
     int status;
-    int cpid;
+    pid_t cpid;
     int in_fd = -1, out_fd = -1;
     int pipe_pos = -1;
 
-    // Detect redirection or pipes
+    /* detect redirection and pipe position */
     for (int i = 0; arglist[i] != NULL; i++) {
-        if (strcmp(arglist[i], "<") == 0 && arglist[i + 1] != NULL) {
-            in_fd = open(arglist[i + 1], O_RDONLY);
-            arglist[i] = NULL;
-        } 
-        else if (strcmp(arglist[i], ">") == 0 && arglist[i + 1] != NULL) {
-            out_fd = open(arglist[i + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            arglist[i] = NULL;
-        } 
-        else if (strcmp(arglist[i], "|") == 0) {
+        if (strcmp(arglist[i], "<") == 0) {
+            if (arglist[i+1]) {
+                in_fd = open(arglist[i+1], O_RDONLY);
+                if (in_fd < 0) perror("open input");
+                arglist[i] = NULL;
+            }
+        } else if (strcmp(arglist[i], ">") == 0) {
+            if (arglist[i+1]) {
+                out_fd = open(arglist[i+1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (out_fd < 0) perror("open output");
+                arglist[i] = NULL;
+            }
+        } else if (strcmp(arglist[i], "|") == 0) {
             pipe_pos = i;
             arglist[i] = NULL;
         }
     }
 
-    // Handle pipes
+    /* handle pipe */
     if (pipe_pos != -1) {
         int pipefd[2];
-        pipe(pipefd);
+        if (pipe(pipefd) < 0) { perror("pipe"); return -1; }
 
-        // Left side of pipe
-        if ((cpid = fork()) == 0) {
+        pid_t left = fork();
+        if (left < 0) { perror("fork"); return -1; }
+        if (left == 0) {
+            /* left child writes to pipe */
             close(pipefd[0]);
             dup2(pipefd[1], STDOUT_FILENO);
             close(pipefd[1]);
             execvp(arglist[0], arglist);
-            perror("pipe left command failed");
+            perror("execvp left");
             exit(1);
         }
 
-        // Right side
-        if (fork() == 0) {
+        pid_t right = fork();
+        if (right < 0) { perror("fork"); return -1; }
+        if (right == 0) {
+            /* right child reads from pipe */
             close(pipefd[1]);
             dup2(pipefd[0], STDIN_FILENO);
             close(pipefd[0]);
             execvp(arglist[pipe_pos + 1], &arglist[pipe_pos + 1]);
-            perror("pipe right command failed");
+            perror("execvp right");
             exit(1);
         }
 
         close(pipefd[0]);
         close(pipefd[1]);
-        wait(NULL);
-        wait(NULL);
+
+        waitpid(left, &status, 0);
+        waitpid(right, &status, 0);
         return 0;
     }
 
-    // Normal execution (no pipe)
+    /* normal single command */
     cpid = fork();
+    if (cpid < 0) {
+        perror("fork");
+        return -1;
+    }
     if (cpid == 0) {
         if (in_fd != -1) {
             dup2(in_fd, STDIN_FILENO);
@@ -66,7 +81,7 @@ int execute(char* arglist[]) {
             close(out_fd);
         }
         execvp(arglist[0], arglist);
-        perror("Command not found");
+        perror("execvp");
         exit(1);
     }
 
@@ -74,6 +89,10 @@ int execute(char* arglist[]) {
     if (out_fd != -1) close(out_fd);
 
     waitpid(cpid, &status, 0);
-    printf("child exited with status %d\n", WEXITSTATUS(status));
+    if (WIFEXITED(status)) {
+        printf("child exited with status %d\n", WEXITSTATUS(status));
+    } else if (WIFSIGNALED(status)) {
+        printf("child terminated by signal %d\n", WTERMSIG(status));
+    }
     return 0;
 }
