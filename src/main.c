@@ -1,56 +1,32 @@
-#define _POSIX_C_SOURCE 200809L
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <readline/readline.h>
-#include <readline/history.h>
 #include "shell.h"
 
 #define PROMPT "myshell> "
 
 int main(void) {
-    char *line;
-    int build_ok;
-
-    /* Build command list from PATH for tab completion */
-    build_ok = build_command_list();
-    if (build_ok != 0) {
-        fprintf(stderr, "Warning: failed to build command list for completion\n");
-    }
-
-    /* Set tab-completion handler */
-    rl_attempted_completion_function = myshell_completion;
+    char line[512];
 
     while (1) {
-        line = readline(PROMPT);
-        if (!line) {
-            printf("\n");
+        printf("%s", PROMPT);
+        fflush(stdout);
+
+        if (!fgets(line, sizeof(line), stdin))
             break;
+
+        char *trim = trim_whitespace(line);
+        if (!trim || *trim == '\0') continue;
+
+        if (strcmp(trim, "exit") == 0)
+            break;
+
+        char **tokens = tokenize(trim);
+        pipeline_t pl = parse_pipeline(tokens);
+        if (pl.count > 0) {
+            execute_pipeline(&pl);
+            free_pipeline(&pl);
         }
-
-        char *trimmed = trim_whitespace(line);
-
-        if (trimmed && *trimmed != '\0') {
-            add_history(trimmed);
-
-            int argc = 0;
-            char **argv = parse_command(trimmed, &argc);
-
-            if (argv && argc > 0) {
-                if (strcmp(argv[0], "exit") == 0) {
-                    free_args(argv);
-                    free(line);
-                    break;
-                }
-
-                execute_command(argv);
-                free_args(argv);
-            }
-        }
-
-        free(line);
+        free_tokens(tokens);
     }
 
-    free_command_list();
+    printf("Exiting myshell...\n");
     return 0;
 }
