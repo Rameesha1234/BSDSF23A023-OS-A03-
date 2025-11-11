@@ -12,26 +12,29 @@
 #define PROMPT "myshell> "
 #define MAX_LINE 1024
 
-/* Execute multiple lines (for then/else blocks) */
+/* Execute multiple lines (used for then/else blocks) */
 static void execute_block(char **lines, int count) {
     for (int i = 0; i < count; i++) {
         if (!lines[i] || strlen(lines[i]) == 0) continue;
+
         char **tokens = tokenize(lines[i]);
         if (!tokens) continue;
+
         pipeline_t *pl = parse_pipeline(tokens);
         free_tokens(tokens);
         if (!pl) continue;
-        execute_pipeline(pl, 0, lines[i]);
+
+        execute_pipeline(pl, 0, lines[i]);  // foreground
         free_pipeline(pl);
     }
 }
 
-/* Read if–then–else–fi block */
+/* Read an if–then–else–fi block and return whether valid */
 static int read_if_block(char *first_line, char **cond_cmd,
                          char ***then_lines, int *then_count,
                          char ***else_lines, int *else_count) {
 
-    *cond_cmd = strdup(first_line + 3); // skip "if "
+    *cond_cmd = strdup(first_line + 3); // skip 'if '
     if (!*cond_cmd) return -1;
 
     *then_lines = malloc(64 * sizeof(char *));
@@ -46,9 +49,13 @@ static int read_if_block(char *first_line, char **cond_cmd,
         char *trim = trim_whitespace(line);
         if (!trim || *trim == '\0') { free(line); continue; }
 
-        if (strcmp(trim, "then") == 0) { free(line); continue; }
-        else if (strcmp(trim, "else") == 0) { in_else = 1; free(line); continue; }
-        else if (strcmp(trim, "fi") == 0) { free(line); break; }
+        if (strcmp(trim, "then") == 0) {
+            free(line); continue;
+        } else if (strcmp(trim, "else") == 0) {
+            in_else = 1; free(line); continue;
+        } else if (strcmp(trim, "fi") == 0) {
+            free(line); break;
+        }
 
         if (!in_else)
             (*then_lines)[(*then_count)++] = strdup(trim);
@@ -66,7 +73,7 @@ int main(void) {
     char *line = NULL;
 
     while (1) {
-        jobs_reap();
+        jobs_reap(); // handle background jobs
         line = readline(PROMPT);
         if (!line) { printf("\n"); break; }
 
@@ -83,7 +90,7 @@ int main(void) {
 
             if (read_if_block(trimmed, &cond_cmd, &then_lines, &then_count,
                               &else_lines, &else_count) == 0) {
-
+                /* Evaluate condition */
                 char **ctoks = tokenize(cond_cmd);
                 if (ctoks) {
                     pipeline_t *cpl = parse_pipeline(ctoks);
@@ -102,6 +109,7 @@ int main(void) {
                 fprintf(stderr, "Malformed if-block\n");
             }
 
+            /* Cleanup */
             free(cond_cmd);
             if (then_lines) {
                 for (int i = 0; i < then_count; i++) free(then_lines[i]);
