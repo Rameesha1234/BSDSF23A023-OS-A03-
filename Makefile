@@ -1,3 +1,7 @@
+# -------------------------------
+# Makefile for BSDSF23A023-OS-A03  (Feature 2 - Built-in Commands)
+# -------------------------------
+
 CC := gcc
 CFLAGS := -Wall -Wextra -Werror -std=gnu11 -g -Iinclude
 LDFLAGS :=
@@ -6,40 +10,59 @@ SRCDIR := src
 BINDIR := bin
 OBJDIR := obj
 
-SOURCES := $(wildcard $(SRCDIR)/*.c)
+# Only compile .c files that are part of this feature
+SOURCES := $(SRCDIR)/main.c $(SRCDIR)/shell.c $(SRCDIR)/execute.c
 OBJECTS := $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(SOURCES))
+
 TARGET := $(BINDIR)/myshell
 
-.PHONY: all clean run dist dirs
+.PHONY: all clean run dist dirs help
 
+# -------------------------------
+# Default build
+# -------------------------------
 all: dirs $(TARGET)
 
 dirs:
 	@mkdir -p $(BINDIR)
 	@mkdir -p $(OBJDIR)
 
-# Link
+# -------------------------------
+# Linking
+# -------------------------------
 $(TARGET): $(OBJECTS)
 	$(CC) $(LDFLAGS) -o $@ $^
 
-# Compile
+# -------------------------------
+# Compilation
+# -------------------------------
 $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Convenience: run the shell
+# -------------------------------
+# Run
+# -------------------------------
 run: all
-	@echo "Launching $(TARGET)"
+	@echo "Launching $(TARGET)..."
 	@$(TARGET)
 
-# Create a tar.gz distribution of the binary
+# -------------------------------
+# Create tar.gz distribution
+# -------------------------------
 dist: all
-	tar czvf myshell-$(shell date +%Y%m%d)-v1.0-base.tar.gz -C $(BINDIR) myshell
+	tar czvf myshell-$(shell date +%Y%m%d)-v2.tar.gz -C $(BINDIR) myshell
 	@echo "Created archive: myshell-*.tar.gz"
 
+# -------------------------------
+# Clean up
+# -------------------------------
 clean:
 	rm -rf $(OBJDIR) $(BINDIR) myshell-*.tar.gz
+	@echo "Cleaned all build files."
 
-# show help
+# -------------------------------
+# Help
+# -------------------------------
 help:
 	@echo "Usage:"
 	@echo "  make        Build the shell (creates $(TARGET))"
