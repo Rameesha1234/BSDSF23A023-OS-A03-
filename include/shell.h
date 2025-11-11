@@ -1,46 +1,31 @@
 #ifndef SHELL_H
 #define SHELL_H
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <unistd.h>
-#include <sys/wait.h>
-#include <fcntl.h>
+#include <limits.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
-#define MAXARGS 20
-#define ARGLEN 100
-#define MAX_LEN 1024
-#define HISTORY_SIZE 50
-#define PROMPT "myshell> "
 
-// Structure for a single command in history
-typedef struct {
-    char *cmd;   /* stored command string */
-    long seq;    /* sequence number */
-} history_entry;
 
-/* Function declarations — updated for Feature 3 */
-char* read_cmd(const char* prompt, FILE* fp);
+/* public function prototypes */
+char *trim_whitespace(char *str);
+char **parse_command(const char *line, int *argc);
+int execute_command(char **argv);
+void free_args(char **args);
+int build_command_list(void);
+void free_command_list(void);
+char **myshell_completion(const char *text, int start, int _attribute_((unused)) end);
 
-void free_history_slot(history_entry* slot);
-void add_history(history_entry history[],
-                 long* hist_count,
-                 long* hist_next_idx,
-                 char* cmdline,
-                 long* global_seq);
+/* completion hooks used by readline */
+char **myshell_completion(const char *text, int start, int end);
+char *command_generator(const char *text, int state);
 
-char* get_history_command(history_entry history[],
-                          long hist_count,
-                          long hist_base_seq,
-                          long n);
-
-int handle_builtin(char** arglist,
-                   history_entry history[],
-                   long hist_count,
-                   long hist_base_seq);
-
-char** tokenize(char* cmdline);
-int execute(char* arglist[]);
-
-#endif
+#endif /* SHELL_H */

@@ -1,59 +1,55 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 #include "shell.h"
 
-int main() {
-    char *cmdline;
-    char **arglist;
+/* prompt */
+#define PROMPT "myshell> "
 
-    /* history data */
-    history_entry history[HISTORY_SIZE] = {0};
-    long hist_count = 0;
-    long hist_next_idx = 0;
-    long global_seq = 1;
+int main(void) {
+    char *line;
+    int build_ok;
 
-    while ((cmdline = read_cmd(PROMPT, stdin)) != NULL) {
-        
-        /* handle !n BEFORE adding to history */
-        if (cmdline[0] == '!') {
-            long n = atol(cmdline + 1);
-
-            long hist_base_seq = (hist_count < HISTORY_SIZE)
-                                 ? 1
-                                 : (global_seq - HISTORY_SIZE);
-
-            char *retrieved = get_history_command(history, hist_count, hist_base_seq, n);
-            if (!retrieved) {
-                printf("No such command in history.\n");
-                free(cmdline);
-                continue;
-            }
-
-            free(cmdline);
-            cmdline = retrieved;
-            printf("%s\n", cmdline);
-        }
-
-        /* add to history after full command is finalized */
-        add_history(history, &hist_count, &hist_next_idx, cmdline, &global_seq);
-
-        arglist = tokenize(cmdline);
-        if (arglist != NULL) {
-
-            long hist_base_seq = (hist_count < HISTORY_SIZE)
-                                 ? 1
-                                 : (global_seq - HISTORY_SIZE);
-
-            if (!handle_builtin(arglist, history, hist_count, hist_base_seq)) {
-                execute(arglist);
-            }
-
-            for (int j = 0; arglist[j] != NULL; j++)
-                free(arglist[j]);
-            free(arglist);
-        }
-
-        free(cmdline);
+    /* build a command list from PATH so we can complete commands */
+    build_ok = build_command_list();
+    if (build_ok != 0) {
+        fprintf(stderr, "Warning: failed to build command list for completion\n");
+        /* not fatal; filename completion will still work */
     }
 
-    printf("\nExiting shell...\n");
+    /* hook our completion function */
+    rl_attempted_completion_function = myshell_completion;
+
+    while (1) {
+        line = readline(PROMPT);
+        if (!line) { /* EOF, e.g., Ctrl-D */
+            printf("\n");
+            break;
+        }
+
+        /* trim leading/trailing whitespace */
+        char *trimmed = trim_whitespace(line);
+        if (trimmed && *trimmed != '\0') {
+            add_history(trimmed); /* only add non-empty commands */
+            int argc;
+            char **argv = parse_command(trimmed, &argc);
+            if (argv != NULL && argc > 0) {
+                /* built-in exit */
+                if (strcmp(argv[0], "exit") == 0) {
+                    free_args(argv);
+                    free(line);
+                    break;
+                }
+                /* execute external/builtin commands via execute_command */
+                execute_command(argv);
+                free_args(argv);
+            }
+        }
+
+        free(line);
+    }
+
+    free_command_list();
     return 0;
 }

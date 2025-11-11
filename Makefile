@@ -1,16 +1,15 @@
-# -------------------------------
-# Makefile for BSDSF23A023-OS-A03  (Feature 2 - Built-in Commands)
-# -------------------------------
+# Makefile for ROLL_NO-OS-A03
+# Compiles only: main.c, shell.c, execute.c
 
 CC := gcc
 CFLAGS := -Wall -Wextra -Werror -std=gnu11 -g -Iinclude
-LDFLAGS :=
+LDFLAGS := -lreadline
 
 SRCDIR := src
 BINDIR := bin
 OBJDIR := obj
 
-# Only compile .c files that are part of this feature
+# Explicitly mention only these 3 source files
 SOURCES := $(SRCDIR)/main.c $(SRCDIR)/shell.c $(SRCDIR)/execute.c
 OBJECTS := $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(SOURCES))
 
@@ -18,51 +17,34 @@ TARGET := $(BINDIR)/myshell
 
 .PHONY: all clean run dist dirs help
 
-# -------------------------------
-# Default build
-# -------------------------------
 all: dirs $(TARGET)
 
 dirs:
 	@mkdir -p $(BINDIR)
 	@mkdir -p $(OBJDIR)
 
-# -------------------------------
-# Linking
-# -------------------------------
+# Link step
 $(TARGET): $(OBJECTS)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CC) -o $@ $^ $(LDFLAGS)
 
-# -------------------------------
-# Compilation
-# -------------------------------
+# Compilation of each file
 $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# -------------------------------
-# Run
-# -------------------------------
+# Run the shell
 run: all
 	@echo "Launching $(TARGET)..."
 	@$(TARGET)
 
-# -------------------------------
-# Create tar.gz distribution
-# -------------------------------
+# Create a tar.gz binary release file
 dist: all
-	tar czvf myshell-$(shell date +%Y%m%d)-v2.tar.gz -C $(BINDIR) myshell
+	tar czvf myshell-$(shell date +%Y%m%d).tar.gz -C $(BINDIR) myshell
 	@echo "Created archive: myshell-*.tar.gz"
 
-# -------------------------------
-# Clean up
-# -------------------------------
 clean:
 	rm -rf $(OBJDIR) $(BINDIR) myshell-*.tar.gz
 	@echo "Cleaned all build files."
 
-# -------------------------------
-# Help
-# -------------------------------
 help:
 	@echo "Usage:"
 	@echo "  make        Build the shell (creates $(TARGET))"
